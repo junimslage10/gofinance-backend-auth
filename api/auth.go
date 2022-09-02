@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"crypto/sha512"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
+	db "github.com/junimslage10/gofinance-backend-auth/db/sqlc"
+	"github.com/junimslage10/gofinance-backend-auth/infrastucture/kafka"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -20,6 +24,10 @@ type loginRequest struct {
 type Claims struct {
 	Username string `json:"username"`
 	jwt.RegisteredClaims
+}
+
+type UseCaseAuthentication struct {
+	KafkaProducer kafka.KafkaProducer
 }
 
 func (server *Server) login(ctx *gin.Context) {
@@ -67,5 +75,23 @@ func (server *Server) login(ctx *gin.Context) {
 		return
 	}
 
+	authorizationTokenDto := db.User{
+		ID:        user.ID,
+		Username:  user.Username,
+		CreatedAt: time.Now(),
+	}
+	authorizationTokenJson, err := json.Marshal(authorizationTokenDto)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		return
+	}
+	var u UseCaseAuthentication
+	err = u.KafkaProducer.Publish(string(authorizationTokenJson), "generate_tokens")
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		return
+	}
+	fmt.Println(err)
 	ctx.JSON(http.StatusOK, generatedTokenToString)
+
 }

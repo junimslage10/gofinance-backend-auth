@@ -8,5 +8,5 @@ services:
     volumes:
       - .:/go/src
     ports:
-      - "8001:8001"
+      - "8082:8082"
     restart: on-failure
