@@ -8,5 +8,14 @@ services:
     volumes:
       - .:/go/src
     ports:
-      - "8082:8082"
+      - "8091:8091"
     restart: on-failure
+    networks:
+      - backend-net
+      - kafka-net
+
+networks:
+  backend-net:
+    external: true
+  kafka-net:
+    external: true

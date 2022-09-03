@@ -6,13 +6,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	_ "fmt"
+	_ "log"
 	"net/http"
 	"time"
 
+	"github.com/confluentinc/confluent-kafka-go/kafka"
+	_ "github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 	db "github.com/junimslage10/gofinance-backend-auth/db/sqlc"
-	"github.com/junimslage10/gofinance-backend-auth/infrastucture/kafka"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -24,10 +27,6 @@ type loginRequest struct {
 type Claims struct {
 	Username string `json:"username"`
 	jwt.RegisteredClaims
-}
-
-type UseCaseAuthentication struct {
-	KafkaProducer kafka.KafkaProducer
 }
 
 func (server *Server) login(ctx *gin.Context) {
@@ -75,23 +74,48 @@ func (server *Server) login(ctx *gin.Context) {
 		return
 	}
 
-	authorizationTokenDto := db.User{
+	// Apache Kafka ---
+	p, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": os.Getenv("KAFKA_BROKERCONNECT_HOST")})
+	if err != nil {
+		panic(err)
+	}
+
+	defer p.Close()
+
+	// Delivery report handler for produced messages
+	go func() {
+		for e := range p.Events() {
+			switch ev := e.(type) {
+			case *kafka.Message:
+				if ev.TopicPartition.Error != nil {
+					fmt.Printf("Delivery failed: %v\n", ev.TopicPartition)
+				} else {
+					fmt.Printf("Delivered message to %v\n", ev.TopicPartition)
+				}
+			}
+		}
+	}()
+
+	// Produce messages to topic (asynchronously)
+	topic := "logins"
+	messageText := &db.User{
 		ID:        user.ID,
 		Username:  user.Username,
-		CreatedAt: time.Now(),
+		Password:  user.Password,
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt,
 	}
-	authorizationTokenJson, err := json.Marshal(authorizationTokenDto)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
-		return
-	}
-	var u UseCaseAuthentication
-	err = u.KafkaProducer.Publish(string(authorizationTokenJson), "generate_tokens")
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
-		return
-	}
-	fmt.Println(err)
-	ctx.JSON(http.StatusOK, generatedTokenToString)
+	messageTextJson, _ := json.Marshal(messageText)
+	p.Produce(&kafka.Message{
+		TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
+		Value:          []byte(string(messageTextJson)),
+	}, nil)
 
+	// Wait for message deliveries before shutting down
+	// Flush and close the producer and the events channel
+	for p.Flush(1000) > 0 {
+		fmt.Print("Still waiting to flush outstanding messages\n", p)
+	}
+
+	ctx.JSON(http.StatusOK, generatedTokenToString)
 }
