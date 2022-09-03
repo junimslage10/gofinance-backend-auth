@@ -9,13 +9,14 @@ import (
 	_ "fmt"
 	_ "log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	_ "github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
-	db "github.com/junimslage10/gofinance-backend-auth/db/sqlc"
+	dto "github.com/junimslage10/gofinance-backend-auth/dto"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -98,10 +99,9 @@ func (server *Server) login(ctx *gin.Context) {
 
 	// Produce messages to topic (asynchronously)
 	topic := "logins"
-	messageText := &db.User{
+	messageText := &dto.UserLogin{
 		ID:        user.ID,
 		Username:  user.Username,
-		Password:  user.Password,
 		Email:     user.Email,
 		CreatedAt: user.CreatedAt,
 	}
